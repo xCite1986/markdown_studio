@@ -10,6 +10,10 @@
 #define MyAppAssocExt ".md"
 #define MyAppAssocKey "MarkdownStudio.Document"
 
+#ifndef AppSourceDir
+#define AppSourceDir "..\dist\MarkdownStudio"
+#endif
+
 [Setup]
 AppId={{E68F5B71-9B5A-4B02-8DF6-48BD9D37283B}
 AppName={#MyAppName}
@@ -38,7 +42,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "associate"; Description: "Markdown-Dateien (.md, .markdown) automatisch mit Markdown Studio verknüpfen"; GroupDescription: "Dateiverknüpfungen:"; Flags: checkedonce
 
 [Files]
-Source: "..\dist\MarkdownStudio\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#AppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\assets\app_icon.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
 
 [Icons]

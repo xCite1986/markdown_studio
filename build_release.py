@@ -1,6 +1,7 @@
 """
 Build and Release Automation Script for Markdown Studio.
-Creates:
+Builds outside OneDrive (in TEMP staging) to guarantee zero file-lock issues,
+then packages into:
 1. Compiled Application (dist/MarkdownStudio/)
 2. Portable ZIP Package (dist/MarkdownStudio-1.0.0-Portable.zip)
 3. Windows Setup Installer (dist/MarkdownStudio-1.0.0-Setup.exe)
@@ -15,9 +16,13 @@ import subprocess
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DIST_DIR = os.path.join(BASE_DIR, "dist")
-BUILD_DIR = os.path.join(BASE_DIR, "build")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
-APP_DIR = os.path.join(DIST_DIR, "MarkdownStudio")
+
+# Staging directories in local %TEMP% for maximum speed and zero OneDrive locks
+TEMP_ROOT = os.environ.get("TEMP", os.path.expanduser("~"))
+STAGING_DIST = os.path.join(TEMP_ROOT, "markdown_studio_staging_dist")
+STAGING_WORK = os.path.join(TEMP_ROOT, "markdown_studio_staging_work")
+STAGING_APP = os.path.join(STAGING_DIST, "MarkdownStudio")
 
 
 def find_iscc() -> str:
@@ -36,8 +41,15 @@ def find_iscc() -> str:
 
 def run_pyinstaller():
     print("=" * 60)
-    print("1. Starte PyInstaller Build...")
+    print("1. Starte PyInstaller Build (in lokaler Staging-Umgebung)...")
     print("=" * 60)
+
+    # Clean staging dirs
+    shutil.rmtree(STAGING_DIST, ignore_errors=True)
+    shutil.rmtree(STAGING_WORK, ignore_errors=True)
+    os.makedirs(STAGING_DIST, exist_ok=True)
+    os.makedirs(STAGING_WORK, exist_ok=True)
+    os.makedirs(DIST_DIR, exist_ok=True)
 
     icon_path = os.path.join(ASSETS_DIR, "app_icon.ico")
     main_py = os.path.join(BASE_DIR, "src", "main.py")
@@ -48,6 +60,8 @@ def run_pyinstaller():
         "--name", "MarkdownStudio",
         "--icon", icon_path,
         f"--add-data={ASSETS_DIR};assets",
+        f"--distpath={STAGING_DIST}",
+        f"--workpath={STAGING_WORK}",
         "--clean",
         "--noconfirm",
         main_py
@@ -71,10 +85,10 @@ def make_portable_zip():
         os.remove(zip_filename)
 
     with zipfile.ZipFile(zip_filename, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for root, _, files in os.walk(APP_DIR):
+        for root, _, files in os.walk(STAGING_APP):
             for file in files:
                 full_path = os.path.join(root, file)
-                rel_path = os.path.relpath(full_path, DIST_DIR)
+                rel_path = os.path.relpath(full_path, STAGING_DIST)
                 zipf.write(full_path, rel_path)
 
     zip_size_mb = os.path.getsize(zip_filename) / (1024 * 1024)
@@ -92,7 +106,11 @@ def make_inno_setup():
         return
 
     iss_file = os.path.join(BASE_DIR, "installer", "setup.iss")
-    cmd = [iscc, iss_file]
+    cmd = [
+        iscc,
+        f"/DAppSourceDir={STAGING_APP}",
+        iss_file
+    ]
     print(f"Kompiliere Setup mit: {iscc}")
     res = subprocess.run(cmd, cwd=os.path.join(BASE_DIR, "installer"))
     if res.returncode != 0:
@@ -104,10 +122,21 @@ def make_inno_setup():
         print(f"Setup Installer erstellt: {setup_exe} ({setup_size_mb:.2f} MB)")
 
 
+def copy_unpacked_to_dist():
+    print("=" * 60)
+    print("4. Kopiere entpacktes Anwendungsverzeichnis nach dist/MarkdownStudio...")
+    print("=" * 60)
+    dest_app = os.path.join(DIST_DIR, "MarkdownStudio")
+    shutil.rmtree(dest_app, ignore_errors=True)
+    shutil.copytree(STAGING_APP, dest_app)
+    print("Fertig.")
+
+
 def main():
     run_pyinstaller()
     make_portable_zip()
     make_inno_setup()
+    copy_unpacked_to_dist()
 
     print("=" * 60)
     print("BUILD & RELEASE ERFOLGREICH ABGESCHLOSSEN!")
@@ -118,6 +147,8 @@ def main():
         if os.path.isfile(fp):
             size_mb = os.path.getsize(fp) / (1024 * 1024)
             print(f" - {f} ({size_mb:.2f} MB)")
+        elif os.path.isdir(fp):
+            print(f" - [{f}/]")
 
 
 if __name__ == "__main__":

@@ -6,17 +6,20 @@ Ein moderner, schneller und eleganter **Markdown Viewer und Editor** für Window
 
 ## 🚀 Features
 
-- **Viewer & Editor in Einem:**
-  - **Live-Vorschau (Split View):** Sofortiges synchrones Rendern des Markdown-Codes beim Tippen.
-  - **Reiner Editor-Modus:** Maximale Arbeitsfläche zum Schreiben.
-  - **Reiner Viewer-Modus:** Perfekt, um `.md`-Dateien per Doppelklick in Windows zu betrachten.
-- **Steuerelementleiste mit Standardformatierungen:**
+- **Bearbeitung im Vorschaumodus (WYSIWYG-Markdown):**
+  - Schreiben und formatieren Sie direkt im gestalteten Vorschaumodus mit echter Typografie.
+  - Änderungen werden live mit dem darunterliegenden Markdown synchronisiert.
+- **Ausklappbare Code-Ansicht (rechts):**
+  - Über die Schaltfläche **💻 Code-Ansicht** in der Steuerelementleiste (oder `F12`) kann der Markdown-Quellcode auf der rechten Seite ein- und ausgeklappt werden.
+  - Vollständige Zwei-Wege-Synchronisation: Änderungen im Quellcode werden sofort in der Vorschau sichtbar und umgekehrt.
+- **Aufgeräumte Steuerelementleiste mit Standardformatierungen:**
   - **Text:** Fett (`Strg+B`), Kursiv (`Strg+I`), Durchgestrichen
   - **Überschriften:** H1 (`Strg+1`), H2 (`Strg+2`), H3 (`Strg+3`)
   - **Listen & Aufgaben:** Aufzählungslisten, nummerierte Listen, interaktive Checklisten (`- [ ]`, `- [x]`)
   - **Zitate & Code:** Blockquotes, Inline-Code (`` ` ``) und Code-Blöcke (```` ``` ````)
   - **Elemente:** Links (`Strg+K`), Bilder mit Dateiauswahl-Dialog, konfigurierbare Tabellen, horizontale Trennlinien
   - **Suchen & Ersetzen:** Vollwertige Leiste (`Strg+F`) mit Vor/Zurück, Groß-/Kleinschreibung und Ersetzen.
+  - *Hinweis:* Systemeinstellungen wie Dunkelmodus und Dateiverknüpfung sind sauber in den Menüs *Ansicht* und *Extras* untergebracht.
 - **Drucken & Speichern direkt in der Steuerelementleiste:**
   - 🖨️ **Drucken (`Strg+P`):** Drucken des gerenderten Dokuments über den nativen Windows-Druckdialog.
   - 🔍 **Druckvorschau (`Strg+Shift+P`):** Mehrseitige interaktive Druckvorschau mit Zoom und Randeinstellungen.

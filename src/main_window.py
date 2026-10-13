@@ -1,6 +1,7 @@
 """
 Main Application Window for Markdown Studio.
-Integrates Editor, Preview, Toolbars, Menus, Print Support, and Settings.
+Features visual preview-mode editing as primary workspace,
+a collapsible right-hand code view, and clean toolbars.
 """
 
 import os
@@ -8,13 +9,13 @@ import sys
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QToolBar, QStatusBar, QLabel, QFileDialog, QMessageBox,
-    QApplication, QButtonGroup, QToolButton
+    QToolButton, QPushButton, QFrame
 )
 from PyQt6.QtGui import QAction, QIcon, QKeySequence, QFont, QCloseEvent, QDragEnterEvent, QDropEvent
 from PyQt6.QtCore import Qt, QTimer, QSettings
 
+from src.visual_editor import VisualEditor
 from src.editor import MarkdownEditor
-from src.preview import MarkdownPreview
 from src.print_manager import PrintManager
 from src.dialogs import (
     InsertLinkDialog, InsertImageDialog, InsertTableDialog,
@@ -29,7 +30,8 @@ Markdown Studio ist ein schneller, moderner **Markdown Viewer und Editor** für 
 ---
 
 ## ✨ Features im Überblick
-- 📝 **Live-Vorschau:** Sofortiges Rendern während der Eingabe
+- 📝 **Vorschau-Bearbeitung:** Schreiben und formatieren Sie direkt im gestalteten Vorschaumodus
+- 💻 **Ausklappbare Code-Ansicht:** Blenden Sie den Markdown-Quellcode bei Bedarf rechts ein
 - 🖨️ **Drucken & PDF:** Professionelles Drucken und hochauflösender PDF-Export direkt über die Steuerelementleiste
 - ⚙️ **Windows-Integration:** Automatische `.md`-Dateiverknüpfung für alle Benutzer (Admin) oder den aktuellen Benutzer
 - 🎨 **Formatierungsleiste:** Fett, Kursiv, Überschriften, Listen, Tabellen, Checkboxen und Code
@@ -63,12 +65,18 @@ def begruessung(name):
 begruessung("Benutzer")
 ```
 
-> **Hinweis:** Sie können Ansichten zwischen *Geteilt*, *Nur Editor* und *Nur Vorschau* über die Steuerelementleiste wechseln.
+> **Hinweis:** Die Code-Ansicht rechts kann jederzeit über die Schaltfläche **Code-Ansicht** in der Leiste ein- oder ausgeklappt werden.
 """
 
 
 class MainWindow(QMainWindow):
     """Main window of Markdown Studio."""
+
+    def _get_bool_setting(self, key: str, default: bool = False) -> bool:
+        val = self.settings.value(key, default)
+        if isinstance(val, bool):
+            return val
+        return str(val).lower() in ("true", "1", "yes")
 
     def __init__(self, initial_file=None):
         super().__init__()
@@ -76,10 +84,12 @@ class MainWindow(QMainWindow):
         self.current_file_path = None
         self.is_modified = False
         self.dark_mode = False
+        self._is_syncing = False
         self.settings = QSettings("MarkdownStudio", "Settings")
 
         # Load saved preferences
-        self.dark_mode = self.settings.value("dark_mode", False, type=bool)
+        self.dark_mode = self._get_bool_setting("dark_mode", False)
+        show_code_saved = self._get_bool_setting("show_code_panel", False)
 
         self.setWindowTitle("Markdown Studio")
         self.resize(1150, 750)
@@ -96,21 +106,33 @@ class MainWindow(QMainWindow):
         self._init_toolbars()
         self._init_statusbar()
 
-        # Debounce timer for smooth preview updates
-        self.render_timer = QTimer(self)
-        self.render_timer.setSingleShot(True)
-        self.render_timer.setInterval(120)  # 120ms debounce
-        self.render_timer.timeout.connect(self._update_preview)
+        # Timers for smooth two-way sync
+        self.sync_to_code_timer = QTimer(self)
+        self.sync_to_code_timer.setSingleShot(True)
+        self.sync_to_code_timer.setInterval(120)
+        self.sync_to_code_timer.timeout.connect(self._sync_visual_to_code)
 
-        self.editor.textChanged.connect(self._on_text_changed)
+        self.sync_to_visual_timer = QTimer(self)
+        self.sync_to_visual_timer.setSingleShot(True)
+        self.sync_to_visual_timer.setInterval(150)
+        self.sync_to_visual_timer.timeout.connect(self._sync_code_to_visual)
+
+        # Connect text changes
+        self.visual_editor.textChanged.connect(self._on_visual_text_changed)
+        self.code_editor.textChanged.connect(self._on_code_text_changed)
+
+        # Initial code panel visibility
+        self.set_code_panel_visible(show_code_saved)
 
         # Load initial file or default sample text
         if initial_file and os.path.exists(initial_file):
             self.load_file(initial_file)
         else:
-            self.editor.setPlainText(DEFAULT_DOCUMENT)
+            self._is_syncing = True
+            self.visual_editor.set_markdown_content(DEFAULT_DOCUMENT)
+            self.code_editor.setPlainText(DEFAULT_DOCUMENT)
+            self._is_syncing = False
             self.set_modified(False)
-            self._update_preview()
             self._update_window_title()
 
     def _init_ui(self):
@@ -120,31 +142,77 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Splitter with Editor (left) and Preview (right)
+        # Splitter: Left = Visual Editor (Preview Mode), Right = Collapsible Code View
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Editor container (includes FindReplaceBar)
-        editor_container = QWidget()
-        editor_layout = QVBoxLayout(editor_container)
-        editor_layout.setContentsMargins(0, 0, 0, 0)
-        editor_layout.setSpacing(0)
+        # 1. Left container: Visual Preview Editor + Find Bar
+        visual_container = QWidget()
+        visual_layout = QVBoxLayout(visual_container)
+        visual_layout.setContentsMargins(0, 0, 0, 0)
+        visual_layout.setSpacing(0)
 
-        self.editor = MarkdownEditor(self, dark_mode=self.dark_mode)
-        editor_layout.addWidget(self.editor)
+        self.visual_editor = VisualEditor(self, dark_mode=self.dark_mode)
+        visual_layout.addWidget(self.visual_editor)
 
-        self.find_bar = FindReplaceBar(self.editor, self)
-        editor_layout.addWidget(self.find_bar)
+        self.find_bar = FindReplaceBar(self.visual_editor, self)
+        visual_layout.addWidget(self.find_bar)
 
-        self.preview = MarkdownPreview(self, dark_mode=self.dark_mode)
+        # 2. Right container: Collapsible Code Panel
+        self.code_panel = QWidget()
+        code_layout = QVBoxLayout(self.code_panel)
+        code_layout.setContentsMargins(0, 0, 0, 0)
+        code_layout.setSpacing(0)
 
-        self.splitter.addWidget(editor_container)
-        self.splitter.addWidget(self.preview)
-        self.splitter.setSizes([550, 600])
+        # Code panel header
+        code_header = QFrame()
+        code_header.setStyleSheet("""
+            QFrame {
+                background-color: #f1f3f5;
+                border-bottom: 1px solid #d0d7de;
+                padding: 4px 8px;
+            }
+        """)
+        header_layout = QHBoxLayout(code_header)
+        header_layout.setContentsMargins(8, 4, 6, 4)
+
+        header_lbl = QLabel("💻 Markdown-Quellcode")
+        header_lbl.setStyleSheet("font-weight: 600; color: #24292f;")
+        header_layout.addWidget(header_lbl)
+        header_layout.addStretch()
+
+        btn_close_panel = QPushButton("✕")
+        btn_close_panel.setToolTip("Code-Ansicht zuklappen")
+        btn_close_panel.setFixedSize(22, 22)
+        btn_close_panel.setStyleSheet("""
+            QPushButton {
+                border: none;
+                border-radius: 3px;
+                color: #57606a;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #e1e4e8;
+                color: #24292f;
+            }
+        """)
+        btn_close_panel.clicked.connect(lambda: self.set_code_panel_visible(False))
+        header_layout.addWidget(btn_close_panel)
+
+        code_layout.addWidget(code_header)
+
+        # Code editor (with line numbers & syntax highlighter)
+        self.code_editor = MarkdownEditor(self, dark_mode=self.dark_mode)
+        code_layout.addWidget(self.code_editor)
+
+        # Assemble Splitter
+        self.splitter.addWidget(visual_container)
+        self.splitter.addWidget(self.code_panel)
+        self.splitter.setSizes([750, 400])
 
         main_layout.addWidget(self.splitter)
 
-        # Sync editor cursor position to status bar
-        self.editor.cursor_position_changed_info.connect(self._on_cursor_pos_changed)
+        # Connect cursor position
+        self.visual_editor.cursor_position_changed_info.connect(self._on_cursor_pos_changed)
 
     def _init_menus(self):
         menu_bar = self.menuBar()
@@ -205,34 +273,34 @@ class MainWindow(QMainWindow):
 
         act_undo = QAction("Rückgängig", self)
         act_undo.setShortcut(QKeySequence.StandardKey.Undo)
-        act_undo.triggered.connect(self.editor.undo)
+        act_undo.triggered.connect(self.visual_editor.undo)
         edit_menu.addAction(act_undo)
 
         act_redo = QAction("Wiederholen", self)
         act_redo.setShortcut(QKeySequence.StandardKey.Redo)
-        act_redo.triggered.connect(self.editor.redo)
+        act_redo.triggered.connect(self.visual_editor.redo)
         edit_menu.addAction(act_redo)
 
         edit_menu.addSeparator()
 
         act_cut = QAction("Ausschneiden", self)
         act_cut.setShortcut(QKeySequence.StandardKey.Cut)
-        act_cut.triggered.connect(self.editor.cut)
+        act_cut.triggered.connect(self.visual_editor.cut)
         edit_menu.addAction(act_cut)
 
         act_copy = QAction("Kopieren", self)
         act_copy.setShortcut(QKeySequence.StandardKey.Copy)
-        act_copy.triggered.connect(self.editor.copy)
+        act_copy.triggered.connect(self.visual_editor.copy)
         edit_menu.addAction(act_copy)
 
         act_paste = QAction("Einfügen", self)
         act_paste.setShortcut(QKeySequence.StandardKey.Paste)
-        act_paste.triggered.connect(self.editor.paste)
+        act_paste.triggered.connect(self.visual_editor.paste)
         edit_menu.addAction(act_paste)
 
         act_select_all = QAction("Alles auswählen", self)
         act_select_all.setShortcut(QKeySequence.StandardKey.SelectAll)
-        act_select_all.triggered.connect(self.editor.selectAll)
+        act_select_all.triggered.connect(self.visual_editor.selectAll)
         edit_menu.addAction(act_select_all)
 
         edit_menu.addSeparator()
@@ -247,62 +315,62 @@ class MainWindow(QMainWindow):
 
         self.act_bold = QAction("Fett (Bold)", self)
         self.act_bold.setShortcut(QKeySequence.StandardKey.Bold)
-        self.act_bold.triggered.connect(self.editor.apply_bold)
+        self.act_bold.triggered.connect(self.visual_editor.apply_bold)
         format_menu.addAction(self.act_bold)
 
         self.act_italic = QAction("Kursiv (Italic)", self)
         self.act_italic.setShortcut(QKeySequence.StandardKey.Italic)
-        self.act_italic.triggered.connect(self.editor.apply_italic)
+        self.act_italic.triggered.connect(self.visual_editor.apply_italic)
         format_menu.addAction(self.act_italic)
 
         self.act_strike = QAction("Durchgestrichen", self)
-        self.act_strike.triggered.connect(self.editor.apply_strikethrough)
+        self.act_strike.triggered.connect(self.visual_editor.apply_strikethrough)
         format_menu.addAction(self.act_strike)
 
         format_menu.addSeparator()
 
         self.act_h1 = QAction("Überschrift 1 (#)", self)
         self.act_h1.setShortcut("Ctrl+1")
-        self.act_h1.triggered.connect(lambda: self.editor.apply_heading(1))
+        self.act_h1.triggered.connect(lambda: self.visual_editor.apply_heading(1))
         format_menu.addAction(self.act_h1)
 
         self.act_h2 = QAction("Überschrift 2 (##)", self)
         self.act_h2.setShortcut("Ctrl+2")
-        self.act_h2.triggered.connect(lambda: self.editor.apply_heading(2))
+        self.act_h2.triggered.connect(lambda: self.visual_editor.apply_heading(2))
         format_menu.addAction(self.act_h2)
 
         self.act_h3 = QAction("Überschrift 3 (###)", self)
         self.act_h3.setShortcut("Ctrl+3")
-        self.act_h3.triggered.connect(lambda: self.editor.apply_heading(3))
+        self.act_h3.triggered.connect(lambda: self.visual_editor.apply_heading(3))
         format_menu.addAction(self.act_h3)
 
         format_menu.addSeparator()
 
         self.act_bullet_list = QAction("Aufzählungsliste (-)", self)
-        self.act_bullet_list.triggered.connect(self.editor.apply_bullet_list)
+        self.act_bullet_list.triggered.connect(self.visual_editor.apply_bullet_list)
         format_menu.addAction(self.act_bullet_list)
 
         self.act_num_list = QAction("Nummerierte Liste (1.)", self)
-        self.act_num_list.triggered.connect(self.editor.apply_numbered_list)
+        self.act_num_list.triggered.connect(self.visual_editor.apply_numbered_list)
         format_menu.addAction(self.act_num_list)
 
         self.act_task_list = QAction("Checkliste (- [ ])", self)
         self.act_task_list.setShortcut("Ctrl+Shift+C")
-        self.act_task_list.triggered.connect(self.editor.apply_task_list)
+        self.act_task_list.triggered.connect(self.visual_editor.apply_task_list)
         format_menu.addAction(self.act_task_list)
 
         self.act_quote = QAction("Zitat (>)", self)
-        self.act_quote.triggered.connect(self.editor.apply_quote)
+        self.act_quote.triggered.connect(self.visual_editor.apply_quote)
         format_menu.addAction(self.act_quote)
 
         format_menu.addSeparator()
 
         self.act_code_inline = QAction("Inline-Code (`)", self)
-        self.act_code_inline.triggered.connect(self.editor.apply_code_inline)
+        self.act_code_inline.triggered.connect(self.visual_editor.apply_code_inline)
         format_menu.addAction(self.act_code_inline)
 
         self.act_code_block = QAction("Code-Block (```)", self)
-        self.act_code_block.triggered.connect(lambda: self.editor.apply_code_block("python"))
+        self.act_code_block.triggered.connect(lambda: self.visual_editor.apply_code_block("python"))
         format_menu.addAction(self.act_code_block)
 
         format_menu.addSeparator()
@@ -321,39 +389,22 @@ class MainWindow(QMainWindow):
         format_menu.addAction(self.act_table)
 
         self.act_hr = QAction("Horizontale Trennlinie (---)", self)
-        self.act_hr.triggered.connect(self.editor.insert_horizontal_rule)
+        self.act_hr.triggered.connect(self.visual_editor.insert_horizontal_rule)
         format_menu.addAction(self.act_hr)
 
         # --- ANSICHT ---
         view_menu = menu_bar.addMenu("&Ansicht")
 
-        act_split = QAction("Geteilte Ansicht (Editor & Vorschau)", self)
-        act_split.triggered.connect(lambda: self.set_view_mode("split"))
-        view_menu.addAction(act_split)
-
-        act_editor_only = QAction("Nur Editor", self)
-        act_editor_only.triggered.connect(lambda: self.set_view_mode("editor"))
-        view_menu.addAction(act_editor_only)
-
-        act_preview_only = QAction("Nur Vorschau (Viewer-Modus)", self)
-        act_preview_only.triggered.connect(lambda: self.set_view_mode("preview"))
-        view_menu.addAction(act_preview_only)
+        self.act_toggle_code = QAction("💻 Code-Ansicht rechts (F12)", self, checkable=True)
+        self.act_toggle_code.setShortcut("F12")
+        self.act_toggle_code.toggled.connect(self.set_code_panel_visible)
+        view_menu.addAction(self.act_toggle_code)
 
         view_menu.addSeparator()
 
         self.act_theme = QAction("🌙 Dunkelmodus umschalten", self)
         self.act_theme.triggered.connect(self.toggle_dark_mode)
         view_menu.addAction(self.act_theme)
-
-        self.act_line_numbers = QAction("Zeilennummern anzeigen", self, checkable=True)
-        self.act_line_numbers.setChecked(True)
-        self.act_line_numbers.toggled.connect(self.editor.set_line_numbers_visible)
-        view_menu.addAction(self.act_line_numbers)
-
-        self.act_word_wrap = QAction("Automatischer Zeilenumbruch", self, checkable=True)
-        self.act_word_wrap.setChecked(True)
-        self.act_word_wrap.toggled.connect(self._toggle_word_wrap)
-        view_menu.addAction(self.act_word_wrap)
 
         # --- EXTRAS ---
         tools_menu = menu_bar.addMenu("&Extras")
@@ -378,7 +429,7 @@ class MainWindow(QMainWindow):
         help_menu.addAction(act_about)
 
     def _init_toolbars(self):
-        # 1. Haupt-Toolbar (Datei, Speichern, Drucken, Ansicht)
+        # 1. Haupt-Toolbar (Datei, Speichern, Drucken, Ausklappbare Code-Ansicht)
         self.main_toolbar = QToolBar("Haupt-Steuerelemente", self)
         self.main_toolbar.setMovable(False)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.main_toolbar)
@@ -395,35 +446,13 @@ class MainWindow(QMainWindow):
         self.main_toolbar.addAction(self.act_export_pdf)
         self.main_toolbar.addSeparator()
 
-        # Ansichts-Modus Buttons
-        self.btn_mode_split = QToolButton()
-        self.btn_mode_split.setText("◫ Geteilt")
-        self.btn_mode_split.setCheckable(True)
-        self.btn_mode_split.setChecked(True)
-        self.btn_mode_split.clicked.connect(lambda: self.set_view_mode("split"))
-
-        self.btn_mode_editor = QToolButton()
-        self.btn_mode_editor.setText("📝 Editor")
-        self.btn_mode_editor.setCheckable(True)
-        self.btn_mode_editor.clicked.connect(lambda: self.set_view_mode("editor"))
-
-        self.btn_mode_preview = QToolButton()
-        self.btn_mode_preview.setText("👁️ Vorschau")
-        self.btn_mode_preview.setCheckable(True)
-        self.btn_mode_preview.clicked.connect(lambda: self.set_view_mode("preview"))
-
-        self.mode_group = QButtonGroup(self)
-        self.mode_group.addButton(self.btn_mode_split)
-        self.mode_group.addButton(self.btn_mode_editor)
-        self.mode_group.addButton(self.btn_mode_preview)
-
-        self.main_toolbar.addWidget(self.btn_mode_split)
-        self.main_toolbar.addWidget(self.btn_mode_editor)
-        self.main_toolbar.addWidget(self.btn_mode_preview)
-        self.main_toolbar.addSeparator()
-
-        self.main_toolbar.addAction(self.act_theme)
-        self.main_toolbar.addAction(self.act_assoc)
+        # AUSKLAPPBARE CODE-ANSICHT (Toggle-Button)
+        self.btn_toggle_code = QToolButton()
+        self.btn_toggle_code.setText("💻 Code-Ansicht")
+        self.btn_toggle_code.setToolTip("Markdown-Quellcode rechts ein- oder ausblenden (F12)")
+        self.btn_toggle_code.setCheckable(True)
+        self.btn_toggle_code.toggled.connect(self.set_code_panel_visible)
+        self.main_toolbar.addWidget(self.btn_toggle_code)
 
         # 2. Formatierungs-Toolbar (Markdown Standardformatierungen)
         self.format_toolbar = QToolBar("Formatierung", self)
@@ -433,60 +462,60 @@ class MainWindow(QMainWindow):
         # Text Style
         btn_bold = self.format_toolbar.addAction("𝐁")
         btn_bold.setToolTip("Fett (Strg+B)")
-        btn_bold.triggered.connect(self.editor.apply_bold)
+        btn_bold.triggered.connect(self.visual_editor.apply_bold)
 
         btn_italic = self.format_toolbar.addAction("𝐼")
         btn_italic.setToolTip("Kursiv (Strg+I)")
-        btn_italic.triggered.connect(self.editor.apply_italic)
+        btn_italic.triggered.connect(self.visual_editor.apply_italic)
 
         btn_strike = self.format_toolbar.addAction("S̶")
         btn_strike.setToolTip("Durchgestrichen")
-        btn_strike.triggered.connect(self.editor.apply_strikethrough)
+        btn_strike.triggered.connect(self.visual_editor.apply_strikethrough)
 
         self.format_toolbar.addSeparator()
 
         # Headings
         btn_h1 = self.format_toolbar.addAction("H1")
         btn_h1.setToolTip("Überschrift 1 (Strg+1)")
-        btn_h1.triggered.connect(lambda: self.editor.apply_heading(1))
+        btn_h1.triggered.connect(lambda: self.visual_editor.apply_heading(1))
 
         btn_h2 = self.format_toolbar.addAction("H2")
         btn_h2.setToolTip("Überschrift 2 (Strg+2)")
-        btn_h2.triggered.connect(lambda: self.editor.apply_heading(2))
+        btn_h2.triggered.connect(lambda: self.visual_editor.apply_heading(2))
 
         btn_h3 = self.format_toolbar.addAction("H3")
         btn_h3.setToolTip("Überschrift 3 (Strg+3)")
-        btn_h3.triggered.connect(lambda: self.editor.apply_heading(3))
+        btn_h3.triggered.connect(lambda: self.visual_editor.apply_heading(3))
 
         self.format_toolbar.addSeparator()
 
         # Lists & Tasks
         btn_bullet = self.format_toolbar.addAction("• Liste")
         btn_bullet.setToolTip("Aufzählungsliste")
-        btn_bullet.triggered.connect(self.editor.apply_bullet_list)
+        btn_bullet.triggered.connect(self.visual_editor.apply_bullet_list)
 
         btn_num = self.format_toolbar.addAction("1. Liste")
         btn_num.setToolTip("Nummerierte Liste")
-        btn_num.triggered.connect(self.editor.apply_numbered_list)
+        btn_num.triggered.connect(self.visual_editor.apply_numbered_list)
 
         btn_task = self.format_toolbar.addAction("☑ Checkliste")
         btn_task.setToolTip("Checkliste / Aufgabenliste (Strg+Umschalt+C)")
-        btn_task.triggered.connect(self.editor.apply_task_list)
+        btn_task.triggered.connect(self.visual_editor.apply_task_list)
 
         btn_quote = self.format_toolbar.addAction("❝ Zitat")
         btn_quote.setToolTip("Blockquote / Zitat")
-        btn_quote.triggered.connect(self.editor.apply_quote)
+        btn_quote.triggered.connect(self.visual_editor.apply_quote)
 
         self.format_toolbar.addSeparator()
 
         # Code
         btn_code = self.format_toolbar.addAction("<> Code")
         btn_code.setToolTip("Inline-Code (`)")
-        btn_code.triggered.connect(self.editor.apply_code_inline)
+        btn_code.triggered.connect(self.visual_editor.apply_code_inline)
 
         btn_block = self.format_toolbar.addAction("📦 Block")
         btn_block.setToolTip("Code-Block (```)")
-        btn_block.triggered.connect(lambda: self.editor.apply_code_block("python"))
+        btn_block.triggered.connect(lambda: self.visual_editor.apply_code_block("python"))
 
         self.format_toolbar.addSeparator()
 
@@ -505,7 +534,7 @@ class MainWindow(QMainWindow):
 
         btn_hr = self.format_toolbar.addAction("➖ Linie")
         btn_hr.setToolTip("Horizontale Trennlinie")
-        btn_hr.triggered.connect(self.editor.insert_horizontal_rule)
+        btn_hr.triggered.connect(self.visual_editor.insert_horizontal_rule)
 
         self.format_toolbar.addSeparator()
 
@@ -537,47 +566,67 @@ class MainWindow(QMainWindow):
         self.status_encoding.setStyleSheet("padding: 0 10px;")
         status.addPermanentWidget(self.status_encoding)
 
-    # --- View Mode Controls ---
-    def set_view_mode(self, mode: str):
-        if mode == "split":
-            self.splitter.widget(0).setVisible(True)
-            self.splitter.widget(1).setVisible(True)
-            self.splitter.setSizes([550, 600])
-            self.btn_mode_split.setChecked(True)
-        elif mode == "editor":
-            self.splitter.widget(0).setVisible(True)
-            self.splitter.widget(1).setVisible(False)
-            self.btn_mode_editor.setChecked(True)
-        elif mode == "preview":
-            self.splitter.widget(0).setVisible(False)
-            self.splitter.widget(1).setVisible(True)
-            self.btn_mode_preview.setChecked(True)
+    # --- Collapsible Code View Control ---
+    def set_code_panel_visible(self, visible: bool):
+        self.code_panel.setVisible(visible)
+        self.btn_toggle_code.blockSignals(True)
+        self.btn_toggle_code.setChecked(visible)
+        self.btn_toggle_code.blockSignals(False)
+
+        self.act_toggle_code.blockSignals(True)
+        self.act_toggle_code.setChecked(visible)
+        self.act_toggle_code.blockSignals(False)
+
+        self.settings.setValue("show_code_panel", visible)
+
+        if visible:
+            # Sync content immediately when opened
+            self._sync_visual_to_code()
+            self.splitter.setSizes([750, 400])
 
     def toggle_dark_mode(self):
         self.dark_mode = not self.dark_mode
         self.settings.setValue("dark_mode", self.dark_mode)
-        self.editor.set_dark_mode(self.dark_mode)
-        self.preview.set_dark_mode(self.dark_mode)
+        self.visual_editor.set_dark_mode(self.dark_mode)
+        self.code_editor.set_dark_mode(self.dark_mode)
         self.act_theme.setText("☀️ Hellmodus" if self.dark_mode else "🌙 Dunkelmodus umschalten")
 
-    def _toggle_word_wrap(self, enabled: bool):
-        wrap_mode = MarkdownEditor.LineWrapMode.WidgetWidth if enabled else MarkdownEditor.LineWrapMode.NoWrap
-        self.editor.setLineWrapMode(wrap_mode)
-
-    # --- Text Change & Live Rendering ---
-    def _on_text_changed(self):
+    # --- Text Synchronization ---
+    def _on_visual_text_changed(self):
+        if self._is_syncing:
+            return
         if not self.is_modified:
             self.set_modified(True)
-        self.render_timer.start()  # Debounced update
         self._update_stats()
+        if self.code_panel.isVisible():
+            self.sync_to_code_timer.start()
 
-    def _update_preview(self):
-        text = self.editor.toPlainText()
-        base_dir = os.path.dirname(self.current_file_path) if self.current_file_path else ""
-        self.preview.render_markdown(text, base_dir=base_dir)
+    def _on_code_text_changed(self):
+        if self._is_syncing:
+            return
+        if not self.is_modified:
+            self.set_modified(True)
+        self._update_stats()
+        self.sync_to_visual_timer.start()
+
+    def _sync_visual_to_code(self):
+        if self._is_syncing:
+            return
+        self._is_syncing = True
+        md = self.visual_editor.get_markdown_content()
+        self.code_editor.setPlainText(md)
+        self._is_syncing = False
+
+    def _sync_code_to_visual(self):
+        if self._is_syncing:
+            return
+        self._is_syncing = True
+        md = self.code_editor.toPlainText()
+        self.visual_editor.set_markdown_content(md)
+        self._is_syncing = False
 
     def _update_stats(self):
-        text = self.editor.toPlainText()
+        text = self.visual_editor.toPlainText()
         chars = len(text)
         words = len(text.split())
         self.status_stats.setText(f"Wörter: {words} | Zeichen: {chars}")
@@ -605,10 +654,12 @@ class MainWindow(QMainWindow):
     def new_file(self):
         if not self._maybe_save_changes():
             return
-        self.editor.clear()
+        self._is_syncing = True
+        self.visual_editor.clear()
+        self.code_editor.clear()
+        self._is_syncing = False
         self.current_file_path = None
         self.set_modified(False)
-        self._update_preview()
         self._update_window_title()
 
     def open_file(self):
@@ -640,9 +691,11 @@ class MainWindow(QMainWindow):
             return
 
         self.current_file_path = os.path.abspath(path)
-        self.editor.setPlainText(content)
+        self._is_syncing = True
+        self.visual_editor.set_markdown_content(content)
+        self.code_editor.setPlainText(content)
+        self._is_syncing = False
         self.set_modified(False)
-        self._update_preview()
         self._update_window_title()
         self._add_recent_file(self.current_file_path)
 
@@ -651,8 +704,9 @@ class MainWindow(QMainWindow):
             return self.save_file_as()
 
         try:
+            content = self.visual_editor.get_markdown_content()
             with open(self.current_file_path, "w", encoding="utf-8") as f:
-                f.write(self.editor.toPlainText())
+                f.write(content)
             self.set_modified(False)
             self._add_recent_file(self.current_file_path)
             self.statusBar().showMessage("Datei erfolgreich gespeichert.", 3000)
@@ -704,7 +758,7 @@ class MainWindow(QMainWindow):
         if path in recents:
             recents.remove(path)
         recents.insert(0, path)
-        recents = recents[:10]  # Keep 10
+        recents = recents[:10]
         self.settings.setValue("recent_files", recents)
         self._update_recent_files_menu()
 
@@ -729,37 +783,37 @@ class MainWindow(QMainWindow):
     # --- Print & PDF Operations ---
     def print_document(self):
         title = os.path.basename(self.current_file_path) if self.current_file_path else "Markdown-Dokument"
-        PrintManager.print_document(self, self.preview, title=title)
+        PrintManager.print_document(self, self.visual_editor, title=title)
 
     def print_preview(self):
         title = os.path.basename(self.current_file_path) if self.current_file_path else "Markdown-Dokument"
-        PrintManager.print_preview(self, self.preview, title=title)
+        PrintManager.print_preview(self, self.visual_editor, title=title)
 
     def export_pdf(self):
         default_name = os.path.splitext(self.current_file_path)[0] + ".pdf" if self.current_file_path else "Dokument.pdf"
-        PrintManager.export_pdf(self, self.preview, default_filename=default_name)
+        PrintManager.export_pdf(self, self.visual_editor, default_filename=default_name)
 
     # --- Formatting Dialogs ---
     def _dialog_insert_link(self):
-        cursor = self.editor.textCursor()
+        cursor = self.visual_editor.textCursor()
         sel = cursor.selectedText()
         dlg = InsertLinkDialog(self, initial_text=sel)
         if dlg.exec() == InsertLinkDialog.DialogCode.Accepted:
             text, url = dlg.get_data()
-            self.editor.insert_link(text, url)
+            self.visual_editor.insert_link(text, url)
 
     def _dialog_insert_image(self):
         base_dir = os.path.dirname(self.current_file_path) if self.current_file_path else ""
         dlg = InsertImageDialog(self, base_dir=base_dir)
         if dlg.exec() == InsertImageDialog.DialogCode.Accepted:
             alt, url = dlg.get_data()
-            self.editor.insert_image(alt, url)
+            self.visual_editor.insert_image(alt, url)
 
     def _dialog_insert_table(self):
         dlg = InsertTableDialog(self)
         if dlg.exec() == InsertTableDialog.DialogCode.Accepted:
             rows, cols = dlg.get_data()
-            self.editor.insert_table(rows, cols)
+            self.visual_editor.insert_table(rows, cols)
 
     def manage_file_association(self):
         dlg = FileAssociationDialog(self)
@@ -767,9 +821,11 @@ class MainWindow(QMainWindow):
 
     def _load_sample_template(self):
         if self._maybe_save_changes():
-            self.editor.setPlainText(DEFAULT_DOCUMENT)
+            self._is_syncing = True
+            self.visual_editor.set_markdown_content(DEFAULT_DOCUMENT)
+            self.code_editor.setPlainText(DEFAULT_DOCUMENT)
+            self._is_syncing = False
             self.set_modified(True)
-            self._update_preview()
 
     def _show_syntax_help(self):
         help_text = """### Markdown Syntax Kurzreferenz:
@@ -798,9 +854,9 @@ class MainWindow(QMainWindow):
             "<p>Version 1.0.0</p>"
             "<p>Ein eleganter, schneller und funktionsreicher Markdown Viewer und Editor für Windows.</p>"
             "<ul>"
-            "<li>Live-Vorschau mit synchronem Rendering</li>"
-            "<li>Drucken, Druckvorschau und PDF-Export</li>"
-            "<li>Vollständige Markdown-Formatierungsleiste</li>"
+            "<li>Bearbeitung direkt im gerenderten Vorschaumodus (WYSIWYG)</li>"
+            "<li>Rechts ausklappbare Quellcode-Ansicht mit 2-Wege-Synchronisation</li>"
+            "<li>Drucken, Druckvorschau und PDF-Export direkt in der Steuerelementleiste</li>"
             "<li>OS-weite Dateiverknüpfung (.md) für Admin oder Benutzer</li>"
             "</ul>"
         )
