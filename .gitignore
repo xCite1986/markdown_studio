@@ -6,8 +6,11 @@ __pycache__/
 # PyInstaller temporary build artifacts
 build/
 *.manifest
-*.spec
 dist/MarkdownStudio/
+
+# Built release binaries (distributed via GitHub Releases, not tracked)
+dist/*.zip
+dist/*.exe
 
 # Environments
 .env
