@@ -7,6 +7,7 @@
 [![Framework: PyQt6](https://img.shields.io/badge/Framework-PyQt6-success.svg)](https://riverbankcomputing.com/software/pyqt/)
 
 Ein moderner, schneller und intuitiver **Markdown Viewer und WYSIWYG-Editor** für Windows.
+<img width="1437" height="900" alt="image" src="https://github.com/user-attachments/assets/614628aa-dc49-42b8-a578-ccfca0954a06" />
 
 ---
 
