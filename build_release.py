@@ -77,10 +77,10 @@ def run_pyinstaller():
 
 def make_portable_zip():
     print("=" * 60)
-    print("2. Erstelle Portable ZIP-Paket...")
+    print("2. Erstelle Portable ZIP-Paket (v1.1.0)...")
     print("=" * 60)
 
-    zip_filename = os.path.join(DIST_DIR, "MarkdownStudio-1.0.0-Portable.zip")
+    zip_filename = os.path.join(DIST_DIR, "MarkdownStudio-1.1.0-Portable.zip")
     if os.path.exists(zip_filename):
         os.remove(zip_filename)
 
@@ -97,7 +97,7 @@ def make_portable_zip():
 
 def make_inno_setup():
     print("=" * 60)
-    print("3. Erstelle Windows Setup Installer (Inno Setup)...")
+    print("3. Erstelle Windows Setup Installer (Inno Setup v1.1.0)...")
     print("=" * 60)
 
     iscc = find_iscc()
@@ -116,7 +116,7 @@ def make_inno_setup():
     if res.returncode != 0:
         raise RuntimeError("Inno Setup Kompilierung fehlgeschlagen!")
 
-    setup_exe = os.path.join(DIST_DIR, "MarkdownStudio-1.0.0-Setup.exe")
+    setup_exe = os.path.join(DIST_DIR, "MarkdownStudio-1.1.0-Setup.exe")
     if os.path.exists(setup_exe):
         setup_size_mb = os.path.getsize(setup_exe) / (1024 * 1024)
         print(f"Setup Installer erstellt: {setup_exe} ({setup_size_mb:.2f} MB)")

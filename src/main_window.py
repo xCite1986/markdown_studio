@@ -851,7 +851,7 @@ class MainWindow(QMainWindow):
             self,
             "Über Markdown Studio",
             "<h2>Markdown Studio</h2>"
-            "<p>Version 1.0.0</p>"
+            "<p>Version 1.1.0</p>"
             "<p>Ein eleganter, schneller und funktionsreicher Markdown Viewer und Editor für Windows.</p>"
             "<ul>"
             "<li>Bearbeitung direkt im gerenderten Vorschaumodus (WYSIWYG)</li>"

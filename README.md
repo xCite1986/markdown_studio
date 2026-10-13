@@ -33,18 +33,18 @@ Ein moderner, schneller und eleganter **Markdown Viewer und Editor** für Window
 
 ---
 
-## 📦 Download & Installation
+## 📦 Download & Installation (Version 1.1.0)
 
 ### Option 1: Setup-Installer (Empfohlen)
-Laden Sie `MarkdownStudio-1.0.0-Setup.exe` herunter und starten Sie die Datei:
+Laden Sie `MarkdownStudio-1.1.0-Setup.exe` herunter und starten Sie die Datei:
 - **Für aktuellen Benutzer (ohne Admin-Rechte):** Installiert nach `%LocalAppData%\Programs\MarkdownStudio`.
 - **Für alle Benutzer (Admin):** Installiert nach `C:\Program Files\MarkdownStudio`.
 - Aktivieren Sie im Setup die Option **„Markdown-Dateien (.md, .markdown) verknüpfen“**, um die Dateien automatisch im Explorer mit Markdown Studio zu öffnen.
 
 ### Option 2: Portable Version
-1. Entpacken Sie `MarkdownStudio-1.0.0-Portable.zip` in ein beliebiges Verzeichnis oder auf einen USB-Stick.
+1. Entpacken Sie `MarkdownStudio-1.1.0-Portable.zip` in ein beliebiges Verzeichnis oder auf einen USB-Stick.
 2. Starten Sie `MarkdownStudio.exe`.
-3. *(Optional)* Verknüpfen Sie `.md`-Dateien über die Schaltfläche **„Dateiverknüpfung verwalten“** in der Menüleiste.
+3. *(Optional)* Verknüpfen Sie `.md`-Dateien über die Menüleiste unter **Extras ➔ Windows .md-Dateiverknüpfung verwalten...**.
 
 ---
 

@@ -3,7 +3,7 @@
 ; Configures automatic OS-wide file associations for .md and .markdown
 
 #define MyAppName "Markdown Studio"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "Markdown Studio"
 #define MyAppExeName "MarkdownStudio.exe"
 #define MyAppAssocName "Markdown-Dokument"
@@ -26,7 +26,7 @@ AllowNoIcons=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=..\dist
-OutputBaseFilename=MarkdownStudio-1.0.0-Setup
+OutputBaseFilename=MarkdownStudio-1.1.0-Setup
 SetupIconFile=..\assets\app_icon.ico
 SolidCompression=yes
 Compression=lzma2/ultra64
